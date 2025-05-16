@@ -3,7 +3,8 @@
 ESP32_C3 68手抛机接收机(无刷电机版)
 
         此版本为配合通用遥控器使用的接收机版本。
-        接受数据改为：左右摇杆两个轴四个方向的数据、3个钮子开关的数据，以及差速转向系数共8项。
+        接收数据改为：左右摇杆两个轴四个方向的数据、3个钮子开关的数据，以及差速转向系数共8项。
+        采用余量油门动态计算转向增量的方式控制电机差速转向
 
 ************************************************************************************************************************************************************/
 
@@ -181,12 +182,6 @@ void airCraftControl() {
     int pwm_r = throttle_base + map(diffrential_r, 0, 255, 0, throttle_remain);
     pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
     pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    // float coe   = pad.diffrential_coe;
-    // int   pwm_l = map((diffrential_l * coe + throttle_base), JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    // int   pwm_r = map((diffrential_r * coe + throttle_base), JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    // // 限定最大范围不得超过无刷电机高电平周期范围
-    // pwm_l = constrain(pwm_l, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    // pwm_r = constrain(pwm_r, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
 
     ledcWrite(MOTOR_CHANNEL_L, pwm_l);
     ledcWrite(MOTOR_CHANNEL_R, pwm_r);
