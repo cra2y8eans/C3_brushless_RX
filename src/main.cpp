@@ -2,10 +2,9 @@
 
 ESP32_C3 68手抛机接收机(无刷电机版)
 
-        此版本为不包含差速控制的基础版本。
-        文件备份于onedrive的c3_brushless_rx_1.0.0文件夹中。
-        同时也同步保存于git c3_brushless_rx仓库中的main分支，方便开发。
-        
+        此版本为配合通用遥控器使用的接收机版本。
+        接受数据改为：左右摇杆两个轴四个方向的数据、3个钮子开关的数据，以及差速转向系数共8项。
+
 ************************************************************************************************************************************************************/
 
 #include "batteryReading.hpp"
@@ -24,8 +23,9 @@ uint8_t padAddress[] = { 0x2c, 0xbc, 0xbb, 0x00, 0x52, 0xd4 }; // ESP32_厚
 
 // 存储接收到的数据
 struct Pad {
-  int button_flag[3]     = {}; // 0、自稳开关      1、襟翼开关     2、微调开关
-  int joystick_values[4] = {}; // 0、左电机油门    1、右电机油门   2、副翼         3、升降舵
+  int   button_flag[3]     = {}; // 0、自稳开关      1、襟翼开关     2、微调开关
+  int   joystick_values[4] = {}; // 0、油门          1、差速         2、副翼         3、升降舵
+  float diffrential_coe;
 };
 Pad pad;
 
@@ -67,6 +67,8 @@ Servo Elevator;
 #define MOTOR_CHANNEL_R 5
 #define MOTOR_FREQUENCY 50
 #define MOTOR_RESOLUTION 12
+#define JOYSTICK_ADC_OUT_MAX 255  // 遥控器摇杆输出ADC最大值
+#define JOYSTICK_ADC_OUT_MIN -255 // 遥控器摇杆输出ADC最小值
 
 /*------------------------------------------------- 滤波 -------------------------------------------------*/
 
@@ -157,13 +159,39 @@ void SerialDataPrint() {
 // 操控
 void airCraftControl() {
   if (esp_connected == true) {
-    int roll_servo_angle  = map(pad.joystick_values[2], ADC_MIN, ADC_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
-    int pitch_servo_angle = map(pad.joystick_values[3], ADC_MIN, ADC_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
-    int pwm_l             = map(pad.joystick_values[0], ADC_MIN, ADC_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    int pwm_r             = map(pad.joystick_values[1], ADC_MIN, ADC_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    /*
+    int   button_status[3]    = {}; // 0、自稳开关    1、襟翼开关     2、微调开关
+    int   joystick_cur_val[4] = {}; // 0、油门        1、差速         2、副翼         3、升降舵
+    float diffrential_coe;
+    */
+
+    // 将摇杆ADC换算成舵机角度
+    int roll_servo_angle  = map(pad.joystick_values[2], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
+    int pitch_servo_angle = map(pad.joystick_values[3], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
+
+    // 计算得出左右差速摇杆拨动的ADC值
+    int throttle_base   = pad.joystick_values[0];               // 基础油门ADC
+    int throttle_remain = JOYSTICK_ADC_OUT_MAX - throttle_base; // 油门余量
+    int diffrential     = pad.joystick_values[1];               // 差速油门ADC
+    int diffrential_l   = (diffrential >= 0) ? diffrential : 0;
+    int diffrential_r   = (diffrential <= 0) ? abs(diffrential) : 0;
+
+    // 将ADC值换算成对应的无刷电机高电平周期占空比
+    int pwm_l = throttle_base + map(diffrential_l, 0, 255, 0, throttle_remain);
+    int pwm_r = throttle_base + map(diffrential_r, 0, 255, 0, throttle_remain);
+    pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    // float coe   = pad.diffrential_coe;
+    // int   pwm_l = map((diffrential_l * coe + throttle_base), JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    // int   pwm_r = map((diffrential_r * coe + throttle_base), JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    // // 限定最大范围不得超过无刷电机高电平周期范围
+    // pwm_l = constrain(pwm_l, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    // pwm_r = constrain(pwm_r, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+
     ledcWrite(MOTOR_CHANNEL_L, pwm_l);
     ledcWrite(MOTOR_CHANNEL_R, pwm_r);
     Elevator.write(pitch_servo_angle);
+
     // 襟翼判断
     if (pad.button_flag[1] == 1) {
       Aileron_L.write(roll_servo_angle);
