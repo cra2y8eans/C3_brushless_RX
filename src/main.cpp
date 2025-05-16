@@ -150,11 +150,11 @@ void dataSendBack() {
 // 串口输出
 void SerialDataPrint() {
   Serial.printf("收到的油门：%d\n", pad.joystick_values[0]);
-  Serial.printf("收到的副翼：%d\n", pad.joystick_values[1]);
-  Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
-  Serial.println("----分割----");
-  Serial.printf("是否收到消息：%d\n", esp_connected);
-  delay(500);
+  Serial.printf("收到的差速：%d\n", pad.joystick_values[1]);
+  // Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
+  // Serial.println("----分割----");
+  // Serial.printf("是否收到消息：%d\n", esp_connected);
+  delay(1000);
 }
 
 // 操控
@@ -180,11 +180,12 @@ void airCraftControl() {
     // 将ADC值换算成对应的无刷电机高电平周期占空比
     int pwm_l = throttle_base + map(diffrential_l, 0, 255, 0, throttle_remain);
     int pwm_r = throttle_base + map(diffrential_r, 0, 255, 0, throttle_remain);
-    pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+    pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
 
     ledcWrite(MOTOR_CHANNEL_L, pwm_l);
     ledcWrite(MOTOR_CHANNEL_R, pwm_r);
+
     Elevator.write(pitch_servo_angle);
 
     // 襟翼判断
@@ -198,8 +199,8 @@ void airCraftControl() {
     }
   } else {
     // 电机停转、飞机盘旋
-    ledcWrite(MOTOR_CHANNEL_L, 0);
-    ledcWrite(MOTOR_CHANNEL_R, 0);
+    ledcWrite(MOTOR_CHANNEL_L, 205);
+    ledcWrite(MOTOR_CHANNEL_R, 205);
     Elevator.write(20);
     Aileron_L.write(20);
     Aileron_R.write(100);
@@ -248,4 +249,5 @@ void setup() {
 void loop() {
   dataSendBack();
   airCraftControl();
+  // SerialDataPrint();
 }
