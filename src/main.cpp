@@ -183,8 +183,14 @@ void airCraftControl() {
     pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
     pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
 
-    ledcWrite(MOTOR_CHANNEL_L, pwm_l);
-    ledcWrite(MOTOR_CHANNEL_R, pwm_r);
+    if (pad.button_flag[2] == 0) {
+      throttle_base = map(pad.joystick_values[0], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+      ledcWrite(MOTOR_CHANNEL_L, throttle_base);
+      ledcWrite(MOTOR_CHANNEL_R, throttle_base);
+    } else {
+      ledcWrite(MOTOR_CHANNEL_L, pwm_l);
+      ledcWrite(MOTOR_CHANNEL_R, pwm_r);
+    }
 
     Elevator.write(pitch_servo_angle);
 
