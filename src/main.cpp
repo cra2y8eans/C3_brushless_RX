@@ -188,8 +188,8 @@ void airCraftControl() {
       ledcWrite(MOTOR_CHANNEL_L, throttle_base);
       ledcWrite(MOTOR_CHANNEL_R, throttle_base);
     } else {
-      ledcWrite(MOTOR_CHANNEL_L, pwm_l);
-      ledcWrite(MOTOR_CHANNEL_R, pwm_r);
+      ledcWrite(MOTOR_CHANNEL_L, pwm_r);
+      ledcWrite(MOTOR_CHANNEL_R, pwm_l);
     }
 
     Elevator.write(pitch_servo_angle);
