@@ -87,12 +87,11 @@ Servo Elevator;
 #define BATTERY_PIN 0         // 电量读取引脚
 #define BATTERY_MAX_VALUE 8.4 // 电池最大电量
 #define BATTERY_MIN_VALUE 7   // 电池最小电量
-#define BATTERY_INTERVAL 2000 // 电量检测间隔时间，单位毫秒
+#define BATTERY_INTERVAL 3000 // 电量检测间隔时间，单位毫秒
 #define R1 10000
 #define R2 2000
 #define ADC_RESOLUTION 12
 
-unsigned long previousMillis = 0; // 当前检测时间
 int           ADC_MAX        = pow(2, ADC_RESOLUTION);
 
 BatReading battery;
@@ -151,7 +150,7 @@ void dataSendBack(void* pt) {
     aircraft.batteryValue[0]  = batStatus.voltage;
     aircraft.batteryValue[1]  = batStatus.voltsPercentage;
     esp_now_send(padAddress, (uint8_t*)&aircraft, sizeof(aircraft));
-    vTaskDelay(3000);
+    vTaskDelay(BATTERY_INTERVAL);
   }
 }
 
