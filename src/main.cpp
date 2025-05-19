@@ -29,7 +29,7 @@ uint8_t padAddress[] = { 0x2c, 0xbc, 0xbb, 0x00, 0x52, 0xd4 }; // ESP32_厚
 
 // 存储接收到的数据
 struct Pad {
-  int   button_flag[3]     = {}; // 0、自稳开关      1、襟翼开关     2、微调开关
+  int   button_flag[3]     = {}; // 0、发送开关      1、襟翼开关     2、差速开关
   int   joystick_values[4] = {}; // 0、油门          1、差速         2、副翼         3、升降舵
   float diffrential_coe;
 };
@@ -92,11 +92,11 @@ Servo Elevator;
 #define R2 2000
 #define ADC_RESOLUTION 12
 
-int           ADC_MAX        = pow(2, ADC_RESOLUTION);
+int ADC_MAX = pow(2, ADC_RESOLUTION);
 
 BatReading battery;
 
-/*------------------------------------------------- 自定义函数 -------------------------------------------------*/
+/*----------------------------------------------- 自定义函数 -------------------------------------------------*/
 
 // 数据发出去之后的回调函数
 void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
@@ -155,6 +155,8 @@ int limit_avg_filter(int pin) {
 
 //  数据回传
 void dataSendBack(void* pt) {
+  // 电量读取初始化
+  battery.init(BATTERY_PIN, R1, R2, BATTERY_MAX_VALUE, BATTERY_MIN_VALUE);
   while (1) {
     BatReading::Bat batStatus = battery.read(AVERAGE_FILTER);
     aircraft.batteryValue[0]  = batStatus.voltage;
@@ -176,6 +178,33 @@ void SerialDataPrint() {
 
 // 操控
 void airCraftControl(void* pt) {
+
+  // 舵机定时器
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+
+  // 设定舵机频率
+  Aileron_L.setPeriodHertz(HERTZ);
+  Aileron_R.setPeriodHertz(HERTZ);
+  Elevator.setPeriodHertz(HERTZ);
+  // 绑定引脚和最大、最小频率
+  Aileron_L.attach(SERVO_AILERON_L, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
+  Aileron_R.attach(SERVO_AILERON_R, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
+  Elevator.attach(SERVO_ELEVATOR, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
+
+  // 无刷电机
+  ledcSetup(MOTOR_CHANNEL_L, MOTOR_FREQUENCY, MOTOR_RESOLUTION); // 通道、频率、精度
+  ledcSetup(MOTOR_CHANNEL_R, MOTOR_FREQUENCY, MOTOR_RESOLUTION); // 通道、频率、精度
+  ledcAttachPin(MOTOR_PIN_L, MOTOR_CHANNEL_L);                   // 引脚号、通道
+  ledcAttachPin(MOTOR_PIN_R, MOTOR_CHANNEL_R);                   // 引脚号、通道
+  ledcWrite(MOTOR_PIN_L, 0);                                     // 引脚号、PWM值
+  ledcWrite(MOTOR_PIN_R, 0);
+
+  /*
+      int     button_status[3]    = {}; // 0、自稳开关    1、襟翼开关     2、微调开关
+      int     joystick_cur_val[4] = {}; // 0、油门        1、差速         2、副翼         3、升降舵
+      float   diffrential_coe;
+  */
   while (1) {
     if (esp_connected == true) {
       /*
@@ -245,33 +274,9 @@ void setup() {
   peerInfo.channel = 1;                      // 设置通信频道
   esp_now_add_peer(&peerInfo);               // 添加通信对象
 
-  // // 舵机定时器
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-
-  // 设定舵机频率
-  Aileron_L.setPeriodHertz(HERTZ);
-  Aileron_R.setPeriodHertz(HERTZ);
-  Elevator.setPeriodHertz(HERTZ);
-  // 绑定引脚和最大、最小频率
-  Aileron_L.attach(SERVO_AILERON_L, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
-  Aileron_R.attach(SERVO_AILERON_R, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
-  Elevator.attach(SERVO_ELEVATOR, SERVO_FREQ_MIN, SERVO_FREQ_MAX);
-
-  // 无刷电机
-  ledcSetup(MOTOR_CHANNEL_L, MOTOR_FREQUENCY, MOTOR_RESOLUTION); // 通道、频率、精度
-  ledcSetup(MOTOR_CHANNEL_R, MOTOR_FREQUENCY, MOTOR_RESOLUTION); // 通道、频率、精度
-  ledcAttachPin(MOTOR_PIN_L, MOTOR_CHANNEL_L);                   // 引脚号、通道
-  ledcAttachPin(MOTOR_PIN_R, MOTOR_CHANNEL_R);                   // 引脚号、通道
-  ledcWrite(MOTOR_PIN_L, 0);                                     // 引脚号、PWM值
-  ledcWrite(MOTOR_PIN_R, 0);
-
-  // 电量读取初始化
-  battery.init(BATTERY_PIN, R1, R2, BATTERY_MAX_VALUE, BATTERY_MIN_VALUE);
-
   // 创建freertos任务
   xTaskCreate(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL);
-  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL);
+  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 3, NULL);
 }
 
 void loop() {
