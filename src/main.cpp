@@ -5,6 +5,9 @@ ESP32_C3 68手抛机接收机(无刷电机版)
         此版本为配合通用遥控器使用的接收机版本。
         接收数据改为：左右摇杆两个轴四个方向的数据、3个钮子开关的数据，以及差速转向系数共8项。
         采用余量油门动态计算转向增量的方式控制电机差速转向
+        将数据回传跟飞机操控两个函数分别使用freertos任务运行。
+        将舵机最大角度范围调整到100度
+        将襟翼操作逻辑改为右拨摇杆
 
 ************************************************************************************************************************************************************/
 
@@ -13,6 +16,8 @@ ESP32_C3 68手抛机接收机(无刷电机版)
 #include <ESP32Servo.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 /*------------------------------------------------- ESP NOW -------------------------------------------------*/
 
@@ -82,12 +87,11 @@ Servo Elevator;
 #define BATTERY_PIN 0         // 电量读取引脚
 #define BATTERY_MAX_VALUE 8.4 // 电池最大电量
 #define BATTERY_MIN_VALUE 7   // 电池最小电量
-#define BATTERY_INTERVAL 2000 // 电量检测间隔时间，单位毫秒
+#define BATTERY_INTERVAL 3000 // 电量检测间隔时间，单位毫秒
 #define R1 10000
 #define R2 2000
 #define ADC_RESOLUTION 12
 
-unsigned long previousMillis = 0; // 当前检测时间
 int           ADC_MAX        = pow(2, ADC_RESOLUTION);
 
 BatReading battery;
@@ -150,69 +154,80 @@ int limit_avg_filter(int pin) {
 }
 
 //  数据回传
-void dataSendBack() {
-  BatReading::Bat batStatus = battery.read(AVERAGE_FILTER);
-  aircraft.batteryValue[0]  = batStatus.voltage;
-  aircraft.batteryValue[1]  = batStatus.voltsPercentage;
-  esp_now_send(padAddress, (uint8_t*)&aircraft, sizeof(aircraft));
+void dataSendBack(void* pt) {
+  while (1) {
+    BatReading::Bat batStatus = battery.read(AVERAGE_FILTER);
+    aircraft.batteryValue[0]  = batStatus.voltage;
+    aircraft.batteryValue[1]  = batStatus.voltsPercentage;
+    esp_now_send(padAddress, (uint8_t*)&aircraft, sizeof(aircraft));
+    vTaskDelay(BATTERY_INTERVAL);
+  }
 }
 
 // 串口输出
 void SerialDataPrint() {
   Serial.printf("收到的油门：%d\n", pad.joystick_values[0]);
-  Serial.printf("收到的副翼：%d\n", pad.joystick_values[1]);
-  Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
-  Serial.println("----分割----");
-  Serial.printf("是否收到消息：%d\n", esp_connected);
-  delay(500);
+  Serial.printf("收到的差速：%d\n", pad.joystick_values[1]);
+  // Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
+  // Serial.println("----分割----");
+  // Serial.printf("是否收到消息：%d\n", esp_connected);
+  delay(1000);
 }
 
 // 操控
-void airCraftControl() {
-  if (esp_connected == true) {
-    /*
-    int   button_status[3]    = {}; // 0、自稳开关    1、襟翼开关     2、微调开关
-    int   joystick_cur_val[4] = {}; // 0、油门        1、差速         2、副翼         3、升降舵
-    float diffrential_coe;
-    */
+void airCraftControl(void* pt) {
+  while (1) {
+    if (esp_connected == true) {
+      /*
+      int   button_status[3]    = {}; // 0、自稳开关    1、襟翼开关     2、微调开关
+      int   joystick_cur_val[4] = {}; // 0、油门        1、差速         2、副翼         3、升降舵
+      float diffrential_coe;
+      */
 
-    // 将摇杆ADC换算成舵机角度
-    int roll_servo_angle  = map(pad.joystick_values[2], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
-    int pitch_servo_angle = map(pad.joystick_values[3], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
+      // 将摇杆ADC换算成舵机角度
+      int roll_servo_angle  = map(pad.joystick_values[2], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
+      int pitch_servo_angle = map(pad.joystick_values[3], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, (SERVO_ANGLE_RANGE - 20));
 
-    // 计算得出左右差速摇杆拨动的ADC值
-    int throttle_base   = pad.joystick_values[0];               // 基础油门ADC
-    int throttle_remain = JOYSTICK_ADC_OUT_MAX - throttle_base; // 油门余量
-    int diffrential     = pad.joystick_values[1];               // 差速油门ADC
-    int diffrential_l   = (diffrential >= 0) ? diffrential : 0;
-    int diffrential_r   = (diffrential <= 0) ? abs(diffrential) : 0;
+      // 计算得出左右差速摇杆拨动的ADC值
+      int throttle_base   = pad.joystick_values[0];               // 基础油门ADC
+      int throttle_remain = JOYSTICK_ADC_OUT_MAX - throttle_base; // 油门余量
+      int diffrential     = pad.joystick_values[1];               // 差速油门ADC
+      int diffrential_l   = (diffrential >= 0) ? diffrential : 0;
+      int diffrential_r   = (diffrential <= 0) ? abs(diffrential) : 0;
 
-    // 将ADC值换算成对应的无刷电机高电平周期占空比
-    int pwm_l = throttle_base + map(diffrential_l, 0, 255, 0, throttle_remain);
-    int pwm_r = throttle_base + map(diffrential_r, 0, 255, 0, throttle_remain);
-    pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
-    pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MAX, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+      // 将ADC值换算成对应的无刷电机高电平周期占空比
+      int pwm_l = throttle_base + map(diffrential_l, 0, 255, 0, throttle_remain);
+      int pwm_r = throttle_base + map(diffrential_r, 0, 255, 0, throttle_remain);
+      pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+      pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
 
-    ledcWrite(MOTOR_CHANNEL_L, pwm_l);
-    ledcWrite(MOTOR_CHANNEL_R, pwm_r);
-    Elevator.write(pitch_servo_angle);
+      if (pad.button_flag[2] == 0) {
+        throttle_base = map(pad.joystick_values[0], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
+        ledcWrite(MOTOR_CHANNEL_L, throttle_base);
+        ledcWrite(MOTOR_CHANNEL_R, throttle_base);
+      } else {
+        ledcWrite(MOTOR_CHANNEL_L, pwm_r);
+        ledcWrite(MOTOR_CHANNEL_R, pwm_l);
+      }
 
-    // 襟翼判断
-    if (pad.button_flag[1] == 1) {
-      Aileron_L.write(roll_servo_angle);
-      Aileron_R.write(SERVO_ANGLE_RANGE - roll_servo_angle);
+      Elevator.write(pitch_servo_angle);
 
+      // 襟翼判断
+      if (pad.button_flag[1] == 1) {
+        Aileron_L.write(SERVO_ANGLE_RANGE - roll_servo_angle);
+        Aileron_R.write(roll_servo_angle);
+      } else {
+        Aileron_L.write(roll_servo_angle);
+        Aileron_R.write(roll_servo_angle);
+      }
     } else {
-      Aileron_L.write(roll_servo_angle);
-      Aileron_R.write(roll_servo_angle);
+      // 电机停转、飞机盘旋
+      ledcWrite(MOTOR_CHANNEL_L, 205);
+      ledcWrite(MOTOR_CHANNEL_R, 205);
+      Elevator.write(20);
+      Aileron_L.write(20);
+      Aileron_R.write(80);
     }
-  } else {
-    // 电机停转、飞机盘旋
-    ledcWrite(MOTOR_CHANNEL_L, 0);
-    ledcWrite(MOTOR_CHANNEL_R, 0);
-    Elevator.write(20);
-    Aileron_L.write(20);
-    Aileron_R.write(100);
   }
 }
 
@@ -253,9 +268,11 @@ void setup() {
 
   // 电量读取初始化
   battery.init(BATTERY_PIN, R1, R2, BATTERY_MAX_VALUE, BATTERY_MIN_VALUE);
+
+  // 创建freertos任务
+  xTaskCreate(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL);
+  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL);
 }
 
 void loop() {
-  dataSendBack();
-  airCraftControl();
 }
