@@ -40,7 +40,7 @@ struct Aircraft {
   float batteryValue[2] = {}; // 0、电压           1、电量
 };
 
-QueueHandle_t padQueue      = xQueueCreate(1, sizeof(Pad));
+QueueHandle_t padQueue = xQueueCreate(1, sizeof(Pad));
 
 // 连接成功标志位
 bool esp_connected;
@@ -247,8 +247,8 @@ void setup() {
   esp_now_add_peer(&peerInfo);               // 添加通信对象
 
   // 创建freertos任务
-  xTaskCreate(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL);
-  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 3, NULL);
+  xTaskCreatePinnedToCore(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL, 1);
 }
 
 void loop() {
