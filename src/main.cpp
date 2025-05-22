@@ -271,7 +271,7 @@ void setup() {
 
   // 创建freertos任务
   xTaskCreate(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL);
-  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 3, NULL);
+  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL);
 }
 
 void loop() {
