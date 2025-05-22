@@ -112,47 +112,6 @@ void OnDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
   memcpy(&pad, data, sizeof(pad)); // 将收到的消息进行存储
 }
 
-// // 平滑滤波
-// int filter(int value) {
-//   buffer[index] = value;
-//   index         = (index + 1) % 10;
-//   int sum       = 0;
-//   for (int i = 0; i < 10; i++)
-//     sum += buffer[i];
-//   return sum / 10;
-// }
-
-// 限幅滤波，防止尖端突变
-int limit_filter(int pin) {
-  static int last_val = analogRead(pin); // 静态变量，只初始化一次，全程序中保存在内存
-  int        val      = analogRead(pin);
-  if (abs(val - last_val) > LIMIT_FILTER) {
-    val = last_val;
-  }
-  last_val = analogRead(pin);
-  return val;
-}
-
-// 均值滤波，抑制噪声
-int avg_filter(int pin) {
-  int val, sum = 0;
-  for (int count = 0; count < AVERAGE_FILTER; count++) {
-    sum += analogRead(pin);
-  }
-  val = sum / AVERAGE_FILTER;
-  return val;
-}
-
-// 限幅滤波+均值滤波
-int limit_avg_filter(int pin) {
-  int val, sum = 0;
-  for (int count = 0; count < AVERAGE_FILTER; count++) {
-    sum += limit_filter(pin);
-  }
-  val = sum / AVERAGE_FILTER;
-  return val;
-}
-
 //  数据回传
 void dataSendBack(void* pt) {
   // 电量读取初始化
