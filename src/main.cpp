@@ -8,6 +8,7 @@ ESP32_C3 68手抛机接收机(无刷电机版)
         将数据回传跟飞机操控两个函数分别使用freertos任务运行。
         将舵机最大角度范围调整到100度
         将襟翼操作逻辑改为右拨摇杆
+        使用freertos队列来管理数据，防止阻塞
 
 ************************************************************************************************************************************************************/
 
@@ -33,13 +34,13 @@ struct Pad {
   int   joystick_values[4] = {}; // 0、油门          1、差速         2、副翼         3、升降舵
   float diffrential_coe;
 };
-Pad pad;
 
 // 发回遥控器数据
 struct Aircraft {
   float batteryValue[2] = {}; // 0、电压           1、电量
 };
-Aircraft aircraft;
+
+QueueHandle_t padQueue      = xQueueCreate(1, sizeof(Pad));
 
 // 连接成功标志位
 bool esp_connected;
@@ -109,48 +110,11 @@ void OnDataSent(const uint8_t* mac_addr, esp_now_send_status_t status) {
 
 // 收到消息后的回调
 void OnDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
+  Pad pad;
   memcpy(&pad, data, sizeof(pad)); // 将收到的消息进行存储
-}
-
-// // 平滑滤波
-// int filter(int value) {
-//   buffer[index] = value;
-//   index         = (index + 1) % 10;
-//   int sum       = 0;
-//   for (int i = 0; i < 10; i++)
-//     sum += buffer[i];
-//   return sum / 10;
-// }
-
-// 限幅滤波，防止尖端突变
-int limit_filter(int pin) {
-  static int last_val = analogRead(pin); // 静态变量，只初始化一次，全程序中保存在内存
-  int        val      = analogRead(pin);
-  if (abs(val - last_val) > LIMIT_FILTER) {
-    val = last_val;
+  if (xQueueOverwrite(padQueue, &pad) != pdPASS) {
+    printf("craftqueue is full\n");
   }
-  last_val = analogRead(pin);
-  return val;
-}
-
-// 均值滤波，抑制噪声
-int avg_filter(int pin) {
-  int val, sum = 0;
-  for (int count = 0; count < AVERAGE_FILTER; count++) {
-    sum += analogRead(pin);
-  }
-  val = sum / AVERAGE_FILTER;
-  return val;
-}
-
-// 限幅滤波+均值滤波
-int limit_avg_filter(int pin) {
-  int val, sum = 0;
-  for (int count = 0; count < AVERAGE_FILTER; count++) {
-    sum += limit_filter(pin);
-  }
-  val = sum / AVERAGE_FILTER;
-  return val;
 }
 
 //  数据回传
@@ -158,6 +122,7 @@ void dataSendBack(void* pt) {
   // 电量读取初始化
   battery.init(BATTERY_PIN, R1, R2, BATTERY_MAX_VALUE, BATTERY_MIN_VALUE);
   while (1) {
+    Aircraft        aircraft;
     BatReading::Bat batStatus = battery.read(AVERAGE_FILTER);
     aircraft.batteryValue[0]  = batStatus.voltage;
     aircraft.batteryValue[1]  = batStatus.voltsPercentage;
@@ -168,12 +133,17 @@ void dataSendBack(void* pt) {
 
 // 串口输出
 void SerialDataPrint() {
-  Serial.printf("收到的油门：%d\n", pad.joystick_values[0]);
-  Serial.printf("收到的差速：%d\n", pad.joystick_values[1]);
-  // Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
-  // Serial.println("----分割----");
-  // Serial.printf("是否收到消息：%d\n", esp_connected);
-  delay(1000);
+  Pad pad;
+  if (xQueueReceive(padQueue, &pad, 10) == pdPASS) {
+    Serial.printf("收到的油门：%d\n", pad.joystick_values[0]);
+    Serial.printf("收到的差速：%d\n", pad.joystick_values[1]);
+    // Serial.printf("收到的升降舵：%d\n", pad.joystick_values[2]);
+    // Serial.println("----分割----");
+    // Serial.printf("是否收到消息：%d\n", esp_connected);
+    delay(1000);
+  } else {
+    printf("padqueue is full\n");
+  }
 }
 
 // 操控
@@ -201,21 +171,28 @@ void airCraftControl(void* pt) {
   ledcWrite(MOTOR_PIN_R, 0);
 
   while (1) {
+    Pad pad;
     if (esp_connected == true) {
       /*
-      int   button_status[3]    = {}; // 0、自稳开关    1、襟翼开关     2、微调开关
+      int   button_status[3]    = {}; // 0、发送开关    1、襟翼开关     2、微调开关
       int   joystick_cur_val[4] = {}; // 0、油门        1、差速         2、副翼         3、升降舵
       float diffrential_coe;
       */
+      int throttle_base, diffrential, roll_servo_angle, pitch_servo_angle, btn_diffrential, btn_flap;
 
-      // 将摇杆ADC换算成舵机角度
-      int roll_servo_angle  = map(pad.joystick_values[2], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
-      int pitch_servo_angle = map(pad.joystick_values[3], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, (SERVO_ANGLE_RANGE - 20));
+      if (xQueueReceive(padQueue, &pad, 0) == pdPASS) {
+        throttle_base     = pad.joystick_values[0]; // 基础油门ADC
+        diffrential       = pad.joystick_values[1]; // 差速油门ADC
+        roll_servo_angle  = map(pad.joystick_values[2], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, SERVO_ANGLE_RANGE);
+        pitch_servo_angle = map(pad.joystick_values[3], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, ADC_MIN, (SERVO_ANGLE_RANGE - 20));
+        btn_diffrential   = pad.button_flag[2];
+        btn_flap          = pad.button_flag[1];
+      } else {
+        printf("padQueue is full\n");
+      }
 
       // 计算得出左右差速摇杆拨动的ADC值
-      int throttle_base   = pad.joystick_values[0];               // 基础油门ADC
       int throttle_remain = JOYSTICK_ADC_OUT_MAX - throttle_base; // 油门余量
-      int diffrential     = pad.joystick_values[1];               // 差速油门ADC
       int diffrential_l   = (diffrential >= 0) ? diffrential : 0;
       int diffrential_r   = (diffrential <= 0) ? abs(diffrential) : 0;
 
@@ -225,7 +202,7 @@ void airCraftControl(void* pt) {
       pwm_l     = map(pwm_l, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
       pwm_r     = map(pwm_r, JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
 
-      if (pad.button_flag[2] == 0) {
+      if (btn_diffrential == 0) {
         throttle_base = map(pad.joystick_values[0], JOYSTICK_ADC_OUT_MIN, JOYSTICK_ADC_OUT_MAX, MOTOR_PWM_MIN, MOTOR_PWM_MAX);
         ledcWrite(MOTOR_CHANNEL_L, throttle_base);
         ledcWrite(MOTOR_CHANNEL_R, throttle_base);
@@ -237,7 +214,7 @@ void airCraftControl(void* pt) {
       Elevator.write(pitch_servo_angle);
 
       // 襟翼判断
-      if (pad.button_flag[1] == 1) {
+      if (btn_flap == 1) {
         Aileron_L.write(SERVO_ANGLE_RANGE - roll_servo_angle);
         Aileron_R.write(roll_servo_angle);
       } else {
