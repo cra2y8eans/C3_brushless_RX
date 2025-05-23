@@ -231,6 +231,8 @@ void setup() {
   // 创建freertos任务
   xTaskCreatePinnedToCore(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL,1);
   xTaskCreatePinnedToCore(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL,1);
+
+  vTaskDelete(NULL);
 }
 
 void loop() {
