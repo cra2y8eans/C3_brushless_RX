@@ -229,8 +229,8 @@ void setup() {
   esp_now_add_peer(&peerInfo);               // 添加通信对象
 
   // 创建freertos任务
-  xTaskCreatePinnedToCore(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL,1);
-  xTaskCreatePinnedToCore(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL,1);
+  xTaskCreate(dataSendBack, "dataSendBack", 1024 * 2, NULL, 1, NULL);
+  xTaskCreate(airCraftControl, "airCraftControl", 1024 * 4, NULL, 1, NULL);
 
   vTaskDelete(NULL);
 }
